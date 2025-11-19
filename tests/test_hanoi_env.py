@@ -1,7 +1,12 @@
 import pytest
 
 from maker_mdap.core import ParseError, ValidationError
-from maker_mdap.hanoi import TowersOfHanoiEnvironment, apply_move, is_goal_state, make_initial_state
+from maker_mdap.hanoi import (
+    TowersOfHanoiEnvironment,
+    apply_move,
+    is_goal_state,
+    make_initial_state,
+)
 
 
 def test_initial_state_and_goal_detection():
@@ -26,12 +31,27 @@ def test_parse_and_validate_response():
     context_state = [[3, 2, 1], [], []]
     context = type("Ctx", (), {"step_index": 0, "state": context_state, "previous_action": None})
     raw = """
-move = [1, 0, 1]
-next_state = [[3, 2], [1], []]
+move = [1, 0, 2]
+next_state = [[3, 2], [], [1]]
 """
     output = env.parse_and_validate_response(context, raw)
-    assert output.action == [1, 0, 1]
-    assert output.next_state == [[3, 2], [1], []]
+    assert output.action == [1, 0, 2]
+    assert output.next_state == [[3, 2], [], [1]]
+
+    fenced_raw = """
+Here is the move:
+```move = [1, 0, 2]```
+And the state:
+```next_state = [[3, 2], [], [1]]```
+"""
+    output = env.parse_and_validate_response(context, fenced_raw)
+    assert output.action == [1, 0, 2]
+    assert output.next_state == [[3, 2], [], [1]]
+
+    inline_raw = """Narration before the move ```move = [1, 0, 2]``` and even more narration before declaring ```next_state = [[3, 2], [], [1]]```"""
+    output = env.parse_and_validate_response(context, inline_raw)
+    assert output.action == [1, 0, 2]
+    assert output.next_state == [[3, 2], [], [1]]
 
     bad_raw = """
 move = [2, 0, 1]
@@ -45,10 +65,31 @@ next_state = [[3, 1], [2], []]
         env.parse_and_validate_response(context, malformed)
 
 
+def test_parse_allows_top_to_bottom_state_representation():
+    env = TowersOfHanoiEnvironment(2)
+    context_state = [[], [1], [2]]
+    context = type(
+        "Ctx",
+        (),
+        {"step_index": 2, "state": context_state, "previous_action": [2, 0, 1]},
+    )
+    raw = """
+move = [1, 1, 2]
+next_state = [[], [], [1, 2]]
+"""
+    output = env.parse_and_validate_response(context, raw)
+    assert output.action == [1, 1, 2]
+    assert output.next_state == [[], [], [2, 1]]
+
+
 def test_parse_rejects_moves_that_break_deterministic_strategy():
     env = TowersOfHanoiEnvironment(3)
-    context_state = [[3, 2], [1], []]
-    context = type("Ctx", (), {"step_index": 1, "state": context_state, "previous_action": [1, 0, 1]})
+    context_state = [[3, 2], [], [1]]
+    context = type(
+        "Ctx",
+        (),
+        {"step_index": 1, "state": context_state, "previous_action": [1, 0, 2]},
+    )
     # Moving disk 1 again is legal but violates the enforced deterministic strategy
     raw = """
 move = [1, 1, 2]
