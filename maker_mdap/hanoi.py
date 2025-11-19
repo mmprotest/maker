@@ -178,10 +178,7 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ParseError("Missing move line")
         move, next_state = parsed
 
-        expected_move = _deterministic_next_move(
-            context.state, context.previous_action, self.num_disks
-        )
-        self._validate_move(context.state, move, expected_move)
+        self._validate_move(context.state, move)
         expected_state = apply_move(context.state, move)
 
         if next_state is not None:
@@ -296,8 +293,8 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ValidationError("Source peg is empty")
         if state[source_peg][-1] != disk_id:
             raise ValidationError("Disk not on top of source peg")
-        if move != expected_move:
-            raise ValidationError("Move must follow deterministic optimal policy")
+        if state[target_peg] and state[target_peg][-1] < disk_id:
+            raise ValidationError("Cannot place larger disk on smaller disk")
 
     def _validate_state(self, state: Any) -> None:
         if not isinstance(state, list) or len(state) != 3:
