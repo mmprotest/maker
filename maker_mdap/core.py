@@ -85,15 +85,17 @@ class RedFlagger:
 
     def get_valid_output_or_red_flag(
         self, context: SubtaskContext, raw_response: str
-    ) -> SubtaskOutput | None:
+    ) -> tuple[SubtaskOutput | None, str | None]:
         if len(raw_response) > self.maker_config.max_response_characters_for_red_flag:
-            logger.debug("Red flag: response too long (%d chars)", len(raw_response))
-            return None
+            reason = f"response too long ({len(raw_response)} chars)"
+            logger.debug("Red flag: %s", reason)
+            return None, reason
         try:
-            return self.env.parse_and_validate_response(context, raw_response)
+            return self.env.parse_and_validate_response(context, raw_response), None
         except (ParseError, ValidationError) as exc:
-            logger.debug("Red flag: parse/validation error: %s", exc)
-            return None
+            reason = f"parse/validation error: {exc}"
+            logger.debug("Red flag: %s", reason)
+            return None, reason
 
 
 class VotingResult:
@@ -166,15 +168,31 @@ def run_voting_for_step(
                 else None
             )
         )
+        attempt_number = voting.total_attempts + 1
         raw_response = llm.generate_step_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=temperature,
             max_output_tokens=None,
         )
-        output = red_flagger.get_valid_output_or_red_flag(context, raw_response)
+        logger.debug(
+            "LLM call step=%d attempt=%d temp=%s response_raw=%s",
+            context.step_index,
+            attempt_number,
+            temperature,
+            raw_response,
+        )
+        output, red_flag_reason = red_flagger.get_valid_output_or_red_flag(
+            context, raw_response
+        )
         if output is None:
             voting.record_red_flag()
+            logger.info(
+                "Step %d attempt %d red-flagged: %s",
+                context.step_index,
+                voting.total_attempts,
+                red_flag_reason,
+            )
             if voting.red_flags > maker_config.max_red_flag_retries_per_step:
                 fallback = getattr(env, "fallback_output", None)
                 if callable(fallback):
