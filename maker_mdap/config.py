@@ -10,7 +10,7 @@ class LLMConfig(BaseModel):
 
     model: str
     api_key: str | None = Field(default_factory=lambda: os.getenv("OPENAI_API_KEY"))
-    base_url: str | None = Field(default_factory=lambda: os.getenv("OPENAI_BASE_URL"))
+    base_url: str | None = None
     temperature: float = 0.1
     max_output_tokens: int = 512
     request_timeout_seconds: int = 60
