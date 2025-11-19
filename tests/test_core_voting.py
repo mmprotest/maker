@@ -91,3 +91,18 @@ def test_fallback_used_after_exceeding_red_flags():
     output = run_voting_for_step(env, llm, config, context)
     assert output.action == "fallback"
 
+
+def test_red_flags_count_toward_vote_limit():
+    responses = ["BAD", "BAD", "good"]
+    env = FallbackEnv()
+    llm = FakeLLMClient(ProbabilisticResponder(responses))
+    config = MAKERConfig(
+        k=1,
+        max_votes_per_step=2,
+        max_red_flag_retries_per_step=5,
+        max_response_characters_for_red_flag=10,
+    )
+    context = SubtaskContext(step_index=0, state=0, previous_action=None)
+    output = run_voting_for_step(env, llm, config, context)
+    assert output.action == "fallback"
+
