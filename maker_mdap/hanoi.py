@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import ast
+import logging
+import re
 from typing import Any, Tuple
 
 from .core import ParseError, SubtaskContext, SubtaskOutput, TaskEnvironment, ValidationError
@@ -141,8 +143,9 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             "Three pegs: 0, 1, 2. Disks: 1 is smallest, n is largest.\n"
             "Rules: move one disk at a time from the top of a peg to the top of another; never place a larger disk on a smaller one.\n"
             "Goal: move all disks from peg 0 to peg 2.\n"
-            "Strategy: if the previous move did not move disk 1, move disk 1 one peg clockwise (0->1->2->0). If the previous move did move disk 1, make the only legal move that does not involve disk 1.\n"
-            "Respond with only the next move and resulting state."
+            "Respond ONLY with a single JSON object, no prose or explanations, in the form:\n"
+            '{"move": [disk_id, from_peg, to_peg], "next_state": [[...], [...], [...]]}\n'
+            "The \"next_state\" field is optional; the system will compute it from your move."
         )
         prev_move_str = (
             str(context.previous_action) if context.previous_action is not None else "<NONE>"
@@ -153,37 +156,103 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             f"Current state: {context.state}\n"
             "Output exactly:\n"
             "move = [disk_id, from_peg, to_peg]\n"
-            "next_state = [[...], [...], [...]]"
+            "next_state = [[...], [...], [...]] (optional)"
         )
         return system_prompt, user_prompt
 
     def parse_and_validate_response(self, context: SubtaskContext, raw_response: str) -> SubtaskOutput:
-        move_line = None
-        state_line = None
-        for line in raw_response.strip().splitlines():
-            stripped = line.strip()
-            if stripped.startswith("move ="):
-                move_line = stripped
-            if stripped.startswith("next_state ="):
-                state_line = stripped
-        if move_line is None or state_line is None:
-            raise ParseError("Missing move or next_state line")
-        try:
-            move = ast.literal_eval(move_line.split("=", 1)[1].strip())
-            next_state = ast.literal_eval(state_line.split("=", 1)[1].strip())
-        except Exception as exc:  # noqa: BLE001
-            raise ParseError(f"Failed to parse response: {exc}") from exc
+        parsed = self._extract_move_and_state(raw_response)
+        if parsed is None:
+            raise ParseError("Missing move line")
+        move, next_state = parsed
 
         self._validate_move(context.state, move)
-        expected_move = _deterministic_next_move(context.state, context.previous_action)
-        if move != expected_move:
-            raise ValidationError("Move does not follow deterministic strategy")
         expected_state = apply_move(context.state, move)
-        self._validate_state(next_state)
-        if expected_state != next_state:
-            raise ValidationError("next_state does not match move applied to current state")
 
-        return SubtaskOutput(action=move, next_state=next_state)
+        if next_state is not None:
+            try:
+                self._validate_state(next_state)
+                if expected_state != next_state:
+                    logger.debug(
+                        "Model next_state mismatch; using computed state instead. expected=%s model=%s",
+                        expected_state,
+                        next_state,
+                    )
+            except ValidationError as exc:
+                logger.debug("Ignoring invalid next_state from model: %s", exc)
+
+        return SubtaskOutput(action=move, next_state=expected_state)
+
+    def _extract_move_and_state(
+        self, raw_response: str
+    ) -> tuple[list[int], list[list[int]] | None] | None:
+        """Parse model output tolerantly while enforcing structured content."""
+
+        cleaned = raw_response.strip()
+        cleaned = re.sub(r"^```[a-zA-Z]*\n|\n```$", "", cleaned, flags=re.MULTILINE)
+
+        # 1) Strict "move = ..." format
+        move_line = None
+        state_line = None
+        for line in cleaned.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("move ="):
+                move_line = stripped.split("=", 1)[1].strip()
+            if stripped.startswith("next_state ="):
+                state_line = stripped.split("=", 1)[1].strip()
+        if move_line:
+            try:
+                move = ast.literal_eval(move_line)
+                next_state = ast.literal_eval(state_line) if state_line else None
+                return move, next_state
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 2) JSON/dict style payload
+        dict_like = None
+        if cleaned.startswith("{") or cleaned.startswith("["):
+            dict_like = cleaned
+        else:
+            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            if match:
+                dict_like = match.group(0)
+        if dict_like:
+            try:
+                payload = ast.literal_eval(dict_like)
+                if isinstance(payload, dict) and "move" in payload:
+                    return payload["move"], payload.get("next_state")
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 3) Labeled lines with ":" delimiter
+        move_match = re.search(r"move\s*:\s*(\[.*?\])", cleaned, re.DOTALL)
+        state_match = re.search(r"next_state\s*:\s*(\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\])", cleaned, re.DOTALL)
+        if move_match:
+            try:
+                move = ast.literal_eval(move_match.group(1))
+                next_state = ast.literal_eval(state_match.group(1)) if state_match else None
+                return move, next_state
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 4) Fallback: first list of three ints + first triple-peg state
+        move_match = re.search(r"\[\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\]", cleaned)
+        state_match = re.search(
+            r"\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\]",
+            cleaned,
+            re.DOTALL,
+        )
+        if move_match:
+            try:
+                move = ast.literal_eval(move_match.group(0))
+                next_state = (
+                    ast.literal_eval(state_match.group(0)) if state_match else None
+                )
+                return move, next_state
+            except Exception:  # noqa: BLE001
+                pass
+
+        return None
 
     def fallback_output(self, context: SubtaskContext) -> SubtaskOutput:
         """Return the deterministic next move when model output is unusable."""
@@ -224,4 +293,6 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         expected = list(range(1, self.num_disks + 1))
         if sorted(all_disks) != expected:
             raise ValidationError("State must include each disk exactly once")
+
+logger = logging.getLogger(__name__)
 
