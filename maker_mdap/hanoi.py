@@ -254,6 +254,73 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
 
         return None
 
+    def _extract_move_and_state(self, raw_response: str) -> tuple[list[int], list[list[int]]] | None:
+        """Parse model output tolerantly while enforcing structured content."""
+
+        cleaned = raw_response.strip()
+        cleaned = re.sub(r"^```[a-zA-Z]*\n|\n```$", "", cleaned, flags=re.MULTILINE)
+
+        # 1) Strict "move = ..." format
+        move_line = None
+        state_line = None
+        for line in cleaned.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("move ="):
+                move_line = stripped.split("=", 1)[1].strip()
+            if stripped.startswith("next_state ="):
+                state_line = stripped.split("=", 1)[1].strip()
+        if move_line and state_line:
+            try:
+                move = ast.literal_eval(move_line)
+                next_state = ast.literal_eval(state_line)
+                return move, next_state
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 2) JSON/dict style payload
+        dict_like = None
+        if cleaned.startswith("{") or cleaned.startswith("["):
+            dict_like = cleaned
+        else:
+            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            if match:
+                dict_like = match.group(0)
+        if dict_like:
+            try:
+                payload = ast.literal_eval(dict_like)
+                if isinstance(payload, dict) and "move" in payload and "next_state" in payload:
+                    return payload["move"], payload["next_state"]
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 3) Labeled lines with ":" delimiter
+        move_match = re.search(r"move\s*:\s*(\[.*?\])", cleaned, re.DOTALL)
+        state_match = re.search(r"next_state\s*:\s*(\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\])", cleaned, re.DOTALL)
+        if move_match and state_match:
+            try:
+                move = ast.literal_eval(move_match.group(1))
+                next_state = ast.literal_eval(state_match.group(1))
+                return move, next_state
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 4) Fallback: first list of three ints + first triple-peg state
+        move_match = re.search(r"\[\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\]", cleaned)
+        state_match = re.search(
+            r"\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\]",
+            cleaned,
+            re.DOTALL,
+        )
+        if move_match and state_match:
+            try:
+                move = ast.literal_eval(move_match.group(0))
+                next_state = ast.literal_eval(state_match.group(0))
+                return move, next_state
+            except Exception:  # noqa: BLE001
+                pass
+
+        return None
+
     def fallback_output(self, context: SubtaskContext) -> SubtaskOutput:
         """Return the deterministic next move when model output is unusable."""
 
