@@ -54,10 +54,6 @@ def _disk1_direction(num_disks: int) -> int:
     return -1 if num_disks % 2 == 1 else 1
 
 
-def _counterclockwise_peg(peg: int) -> int:
-    return (peg + 2) % 3
-
-
 def _legal_moves(state: list[list[int]]) -> list[Tuple[int, int, int]]:
     moves: list[Tuple[int, int, int]] = []
     for src in range(3):
@@ -177,7 +173,7 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ParseError("Missing move or next_state line")
         try:
             move = ast.literal_eval(move_expr)
-            next_state = ast.literal_eval(state_expr)
+            raw_state = ast.literal_eval(state_expr)
         except Exception as exc:  # noqa: BLE001
             raise ParseError(f"Failed to parse response: {exc}") from exc
 
@@ -186,11 +182,41 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         )
         self._validate_move(context.state, move, expected_move)
         expected_state = apply_move(context.state, move)
+        next_state = self._normalize_state_representation(raw_state)
         self._validate_state(next_state)
         if expected_state != next_state:
             raise ValidationError("next_state does not match move applied to current state")
 
         return SubtaskOutput(action=move, next_state=next_state)
+
+    def _normalize_state_representation(self, state: Any) -> list[list[int]]:
+        if not isinstance(state, list) or len(state) != 3:
+            raise ValidationError("State must be list of three lists")
+        normalized: list[list[int]] = []
+        for peg in state:
+            normalized.append(self._normalize_peg(peg))
+        return normalized
+
+    def _normalize_peg(self, peg: Any) -> list[int]:
+        if not isinstance(peg, list):
+            raise ValidationError("Each peg must be a list")
+        if any(not isinstance(disk, int) for disk in peg):
+            raise ValidationError("All disks must be integers")
+        if len(peg) <= 1:
+            return peg.copy()
+        if self._is_strictly_descending(peg):
+            return peg.copy()
+        if self._is_strictly_ascending(peg):
+            return list(reversed(peg))
+        raise ValidationError("Disks on peg must be in strictly descending order")
+
+    @staticmethod
+    def _is_strictly_descending(values: list[int]) -> bool:
+        return all(values[i] > values[i + 1] for i in range(len(values) - 1))
+
+    @staticmethod
+    def _is_strictly_ascending(values: list[int]) -> bool:
+        return all(values[i] < values[i + 1] for i in range(len(values) - 1))
 
     def _extract_assignment_expr(self, raw_response: str, key: str) -> str | None:
         prefix = f"{key} ="
