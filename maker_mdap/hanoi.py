@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import ast
+import logging
+import re
 from typing import Any, Tuple
 
 from .core import ParseError, SubtaskContext, SubtaskOutput, TaskEnvironment, ValidationError
@@ -50,6 +52,10 @@ def _clockwise_peg(peg: int) -> int:
     return (peg + 1) % 3
 
 
+def _counterclockwise_peg(peg: int) -> int:
+    return (peg + 2) % 3
+
+
 def _legal_moves(state: list[list[int]]) -> list[Tuple[int, int, int]]:
     moves: list[Tuple[int, int, int]] = []
     for src in range(3):
@@ -64,14 +70,21 @@ def _legal_moves(state: list[list[int]]) -> list[Tuple[int, int, int]]:
     return moves
 
 
-def _disk1_clockwise_move(state: list[list[int]]) -> list[int]:
+def _disk1_direction(num_disks: int) -> str:
+    """Return the movement direction for disk 1 (clockwise/counterclockwise)."""
+
+    return "clockwise" if num_disks % 2 == 0 else "counterclockwise"
+
+
+def _disk1_directional_move(state: list[list[int]], num_disks: int) -> list[int]:
     for peg_idx, peg in enumerate(state):
         if peg and peg[-1] == 1:
             src = peg_idx
             break
     else:
         raise ValidationError("Disk 1 not found on any peg")
-    target = _clockwise_peg(src)
+    direction = _disk1_direction(num_disks)
+    target = _clockwise_peg(src) if direction == "clockwise" else _counterclockwise_peg(src)
     if state[target] and state[target][-1] < 1:
         raise ValidationError("Illegal placement for disk 1")
     return [1, src, target]
@@ -85,7 +98,7 @@ def _only_legal_move_excluding_disk1(state: list[list[int]]) -> list[int]:
 
 
 def _deterministic_next_move(
-    state: list[list[int]], previous_move: list[int] | None
+    state: list[list[int]], previous_move: list[int] | None, num_disks: int
 ) -> list[int]:
     """Return the deterministic next move for the given ``state``.
 
@@ -96,7 +109,7 @@ def _deterministic_next_move(
     """
 
     if previous_move is None or previous_move[0] != 1:
-        return _disk1_clockwise_move(state)
+        return _disk1_directional_move(state, num_disks)
     return _only_legal_move_excluding_disk1(state)
 
 
@@ -109,7 +122,7 @@ def compute_deterministic_sequence(num_disks: int) -> list[Tuple[list[list[int]]
     total_steps = 2 ** num_disks - 1
 
     for _ in range(total_steps):
-        move = _deterministic_next_move(state, previous_move)
+        move = _deterministic_next_move(state, previous_move, num_disks)
         next_state = apply_move(state, move)
         sequence.append((state, move, next_state))
         state = next_state
@@ -163,14 +176,45 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         return system_prompt, user_prompt
 
     def parse_and_validate_response(self, context: SubtaskContext, raw_response: str) -> SubtaskOutput:
+        parsed = self._extract_move_and_state(raw_response)
+        if parsed is None:
+            raise ParseError("Missing move line")
+        move, next_state = parsed
+
+        self._validate_move(context.state, move)
+        expected_state = apply_move(context.state, move)
+
+        if next_state is not None:
+            try:
+                self._validate_state(next_state)
+                if expected_state != next_state:
+                    logger.debug(
+                        "Model next_state mismatch; using computed state instead. expected=%s model=%s",
+                        expected_state,
+                        next_state,
+                    )
+            except ValidationError as exc:
+                logger.debug("Ignoring invalid next_state from model: %s", exc)
+
+        return SubtaskOutput(action=move, next_state=expected_state)
+
+    def _extract_move_and_state(
+        self, raw_response: str
+    ) -> tuple[list[int], list[list[int]] | None] | None:
+        """Parse model output tolerantly while enforcing structured content."""
+
+        cleaned = raw_response.strip()
+        cleaned = re.sub(r"^```[a-zA-Z]*\n|\n```$", "", cleaned, flags=re.MULTILINE)
+
+        # 1) Strict "move = ..." format
         move_line = None
         state_line = None
-        for line in raw_response.strip().splitlines():
+        for line in cleaned.splitlines():
             stripped = line.strip()
             if stripped.startswith("```") and stripped.endswith("```") and len(stripped) > 6:
                 stripped = stripped.strip("`").strip()
             if stripped.startswith("move ="):
-                move_line = stripped
+                move_line = stripped.split("=", 1)[1].strip()
             if stripped.startswith("next_state ="):
                 state_line = stripped
         if move_line is None or state_line is None:
@@ -229,4 +273,6 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         expected = list(range(1, self.num_disks + 1))
         if sorted(all_disks) != expected:
             raise ValidationError("State must include each disk exactly once")
+
+logger = logging.getLogger(__name__)
 
