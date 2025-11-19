@@ -214,62 +214,30 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             if stripped.startswith("move ="):
                 move_line = stripped.split("=", 1)[1].strip()
             if stripped.startswith("next_state ="):
-                state_line = stripped.split("=", 1)[1].strip()
-        if move_line:
-            try:
-                move = ast.literal_eval(move_line)
-                next_state = ast.literal_eval(state_line) if state_line else None
-                return move, next_state
-            except Exception:  # noqa: BLE001
-                pass
+                state_line = stripped
+        if move_line is None or state_line is None:
+            raise ParseError("Missing move or next_state line")
+        try:
+            move = ast.literal_eval(move_line.split("=", 1)[1].strip())
+            next_state = ast.literal_eval(state_line.split("=", 1)[1].strip())
+        except Exception as exc:  # noqa: BLE001
+            raise ParseError(f"Failed to parse response: {exc}") from exc
 
-        # 2) JSON/dict style payload
-        dict_like = None
-        if cleaned.startswith("{") or cleaned.startswith("["):
-            dict_like = cleaned
-        else:
-            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-            if match:
-                dict_like = match.group(0)
-        if dict_like:
-            try:
-                payload = ast.literal_eval(dict_like)
-                if isinstance(payload, dict) and "move" in payload:
-                    return payload["move"], payload.get("next_state")
-            except Exception:  # noqa: BLE001
-                pass
+        expected_move = _deterministic_next_move(context.state, context.previous_action)
+        self._validate_move(context.state, move, expected_move)
+        expected_state = apply_move(context.state, move)
+        self._validate_state(next_state)
+        if expected_state != next_state:
+            raise ValidationError("next_state does not match move applied to current state")
 
-        # 3) Labeled lines with ":" delimiter
-        move_match = re.search(r"move\s*:\s*(\[.*?\])", cleaned, re.DOTALL)
-        state_match = re.search(r"next_state\s*:\s*(\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\])", cleaned, re.DOTALL)
-        if move_match:
-            try:
-                move = ast.literal_eval(move_match.group(1))
-                next_state = ast.literal_eval(state_match.group(1)) if state_match else None
-                return move, next_state
-            except Exception:  # noqa: BLE001
-                pass
+        return SubtaskOutput(action=move, next_state=next_state)
 
-        # 4) Fallback: first list of three ints + first triple-peg state
-        move_match = re.search(r"\[\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\]", cleaned)
-        state_match = re.search(
-            r"\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\]",
-            cleaned,
-            re.DOTALL,
-        )
-        if move_match:
-            try:
-                move = ast.literal_eval(move_match.group(0))
-                next_state = (
-                    ast.literal_eval(state_match.group(0)) if state_match else None
-                )
-                return move, next_state
-            except Exception:  # noqa: BLE001
-                pass
-
-        return None
-
-    def _validate_move(self, state: list[list[int]], move: Any) -> None:
+    def _validate_move(
+        self,
+        state: list[list[int]],
+        move: Any,
+        expected_move: list[int] | None = None,
+    ) -> None:
         if not isinstance(move, list) or len(move) != 3 or not all(
             isinstance(x, int) for x in move
         ):
@@ -285,15 +253,8 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ValidationError("Source peg is empty")
         if state[source_peg][-1] != disk_id:
             raise ValidationError("Disk not on top of source peg")
-        if state[target_peg] and state[target_peg][-1] < disk_id:
-            raise ValidationError("Cannot place larger disk on smaller disk")
-
         if expected_move is not None and move != expected_move:
-            logger.debug(
-                "Model move differs from provided expected move; accepting legal move instead. expected=%s actual=%s",
-                expected_move,
-                move,
-            )
+            raise ValidationError("Move does not follow deterministic strategy")
 
     def _validate_state(self, state: Any) -> None:
         if not isinstance(state, list) or len(state) != 3:
