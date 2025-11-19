@@ -211,6 +211,8 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         state_line = None
         for line in cleaned.splitlines():
             stripped = line.strip()
+            if stripped.startswith("```") and stripped.endswith("```") and len(stripped) > 6:
+                stripped = stripped.strip("`").strip()
             if stripped.startswith("move ="):
                 move_line = stripped.split("=", 1)[1].strip()
             if stripped.startswith("next_state ="):

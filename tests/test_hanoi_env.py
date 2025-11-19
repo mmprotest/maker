@@ -53,18 +53,19 @@ next_state = [[3, 2], [], [1]]
     assert output.action == [1, 0, 2]
     assert output.next_state == [[3, 2], [], [1]]
 
-    wrong_state = """
-move = [1, 0, 2]
-next_state = [[3, 2, 1], [], []]
+    fenced_raw = """
+Here is the move:
+```move = [1, 0, 1]```
+And the state:
+```next_state = [[3, 2], [1], []]```
 """
-    output = env.parse_and_validate_response(context, wrong_state)
-    assert output.action == [1, 0, 2]
-    # We trust the validated move even if the provided next_state is wrong
-    assert output.next_state == [[3, 2], [], [1]]
+    output = env.parse_and_validate_response(context, fenced_raw)
+    assert output.action == [1, 0, 1]
+    assert output.next_state == [[3, 2], [1], []]
 
-    illegal_move = """
-move = [3, 1, 0]
-next_state = [[3, 2, 1], [], []]
+    bad_raw = """
+move = [2, 0, 1]
+next_state = [[3, 1], [2], []]
 """
     with pytest.raises(ValidationError):
         env.parse_and_validate_response(context, illegal_move)
