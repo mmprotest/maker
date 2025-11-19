@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import ast
+import logging
+import re
 from typing import Any, Tuple
 
 from .core import ParseError, SubtaskContext, SubtaskOutput, TaskEnvironment, ValidationError
@@ -305,6 +307,8 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ValidationError("Source peg is empty")
         if state[source_peg][-1] != disk_id:
             raise ValidationError("Disk not on top of source peg")
+        if expected_move is not None and move != expected_move:
+            raise ValidationError("Move does not follow deterministic strategy")
 
     def _validate_state(self, state: Any) -> None:
         if not isinstance(state, list) or len(state) != 3:
@@ -321,4 +325,6 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         expected = list(range(1, self.num_disks + 1))
         if sorted(all_disks) != expected:
             raise ValidationError("State must include each disk exactly once")
+
+logger = logging.getLogger(__name__)
 
