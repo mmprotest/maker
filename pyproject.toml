@@ -1,0 +1,25 @@
+[project]
+name = "maker-mdap"
+version = "0.1.0"
+description = "MAKER method implementation with Towers of Hanoi example"
+authors = [{name = "AutoGen", email = "autogen@example.com"}]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openai >= 1.0, < 2.0",
+    "pydantic >= 2.0, < 3.0",
+    "typer >= 0.9, < 1.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[project.scripts]
+"maker-hanoi" = "maker_mdap.cli:app"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
