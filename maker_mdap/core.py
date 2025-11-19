@@ -230,6 +230,12 @@ class MAKERRunner:
             outputs.append(output)
             stats.votes_per_step.append(voting_result.total_votes)
             stats.red_flags_per_step.append(voting_result.red_flags)
+            logger.info(
+                "Step %d: move %s -> state %s",
+                step_index + 1,
+                output.action,
+                output.next_state,
+            )
             state = output.next_state
             previous_action = output.action
             step_index += 1
