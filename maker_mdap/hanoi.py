@@ -48,8 +48,10 @@ def is_goal_state(state: list[list[int]], num_disks: int) -> bool:
     return state == [[], [], list(range(num_disks, 0, -1))]
 
 
-def _clockwise_peg(peg: int) -> int:
-    return (peg + 1) % 3
+def _disk1_direction(num_disks: int) -> int:
+    """Return step direction for disk 1 based on disk parity."""
+
+    return -1 if num_disks % 2 == 1 else 1
 
 
 def _counterclockwise_peg(peg: int) -> int:
@@ -70,21 +72,14 @@ def _legal_moves(state: list[list[int]]) -> list[Tuple[int, int, int]]:
     return moves
 
 
-def _disk1_direction(num_disks: int) -> str:
-    """Return the movement direction for disk 1 (clockwise/counterclockwise)."""
-
-    return "clockwise" if num_disks % 2 == 0 else "counterclockwise"
-
-
-def _disk1_directional_move(state: list[list[int]], num_disks: int) -> list[int]:
+def _disk1_clockwise_move(state: list[list[int]], num_disks: int) -> list[int]:
     for peg_idx, peg in enumerate(state):
         if peg and peg[-1] == 1:
             src = peg_idx
             break
     else:
         raise ValidationError("Disk 1 not found on any peg")
-    direction = _disk1_direction(num_disks)
-    target = _clockwise_peg(src) if direction == "clockwise" else _counterclockwise_peg(src)
+    target = (src + _disk1_direction(num_disks)) % 3
     if state[target] and state[target][-1] < 1:
         raise ValidationError("Illegal placement for disk 1")
     return [1, src, target]
@@ -109,7 +104,7 @@ def _deterministic_next_move(
     """
 
     if previous_move is None or previous_move[0] != 1:
-        return _disk1_directional_move(state, num_disks)
+        return _disk1_clockwise_move(state, num_disks)
     return _only_legal_move_excluding_disk1(state)
 
 
@@ -186,7 +181,9 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         except Exception as exc:  # noqa: BLE001
             raise ParseError(f"Failed to parse response: {exc}") from exc
 
-        expected_move = _deterministic_next_move(context.state, context.previous_action)
+        expected_move = _deterministic_next_move(
+            context.state, context.previous_action, self.num_disks
+        )
         self._validate_move(context.state, move, expected_move)
         expected_state = apply_move(context.state, move)
         self._validate_state(next_state)
