@@ -85,15 +85,17 @@ class RedFlagger:
 
     def get_valid_output_or_red_flag(
         self, context: SubtaskContext, raw_response: str
-    ) -> SubtaskOutput | None:
+    ) -> tuple[SubtaskOutput | None, str | None]:
         if len(raw_response) > self.maker_config.max_response_characters_for_red_flag:
-            logger.debug("Red flag: response too long (%d chars)", len(raw_response))
-            return None
+            reason = f"response too long ({len(raw_response)} chars)"
+            logger.debug("Red flag: %s", reason)
+            return None, reason
         try:
-            return self.env.parse_and_validate_response(context, raw_response)
+            return self.env.parse_and_validate_response(context, raw_response), None
         except (ParseError, ValidationError) as exc:
-            logger.debug("Red flag: parse/validation error: %s", exc)
-            return None
+            reason = f"parse/validation error: {exc}"
+            logger.debug("Red flag: %s", reason)
+            return None, reason
 
 
 class VotingResult:
@@ -104,6 +106,12 @@ class VotingResult:
         self.candidates: Dict[str, SubtaskOutput] = {}
         self.red_flags: int = 0
         self.total_votes: int = 0
+
+    @property
+    def total_attempts(self) -> int:
+        """Total model calls made, including red-flagged responses."""
+
+        return self.total_votes + self.red_flags
 
     def record_vote(self, key: str, output: SubtaskOutput) -> None:
         self.total_votes += 1
@@ -130,6 +138,7 @@ class RunStats:
 
     votes_per_step: list[int]
     red_flags_per_step: list[int]
+    attempts_per_step: list[int]
 
 
 def run_voting_for_step(
@@ -148,7 +157,7 @@ def run_voting_for_step(
     red_flagger = RedFlagger(env, maker_config)
     voting = result if result is not None else VotingResult()
 
-    while voting.total_votes < maker_config.max_votes_per_step:
+    while voting.total_attempts < maker_config.max_votes_per_step:
         system_prompt, user_prompt = env.make_prompts(context)
         temperature = (
             temperature_first_vote
@@ -159,15 +168,31 @@ def run_voting_for_step(
                 else None
             )
         )
+        attempt_number = voting.total_attempts + 1
         raw_response = llm.generate_step_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=temperature,
             max_output_tokens=None,
         )
-        output = red_flagger.get_valid_output_or_red_flag(context, raw_response)
+        logger.debug(
+            "LLM call step=%d attempt=%d temp=%s response_raw=%s",
+            context.step_index,
+            attempt_number,
+            temperature,
+            raw_response,
+        )
+        output, red_flag_reason = red_flagger.get_valid_output_or_red_flag(
+            context, raw_response
+        )
         if output is None:
             voting.record_red_flag()
+            logger.info(
+                "Step %d attempt %d red-flagged: %s",
+                context.step_index,
+                voting.total_attempts,
+                red_flag_reason,
+            )
             if voting.red_flags > maker_config.max_red_flag_retries_per_step:
                 raise VoteLimitExceededError(
                     "Exceeded maximum red-flag retries for step"
@@ -209,7 +234,7 @@ class MAKERRunner:
         previous_action = None
         step_index = 0
         outputs: list[SubtaskOutput] = []
-        stats = RunStats(votes_per_step=[], red_flags_per_step=[])
+        stats = RunStats(votes_per_step=[], red_flags_per_step=[], attempts_per_step=[])
 
         while not self.env.is_terminal(state, step_index):
             if max_steps is not None and step_index >= max_steps:
@@ -230,6 +255,7 @@ class MAKERRunner:
             outputs.append(output)
             stats.votes_per_step.append(voting_result.total_votes)
             stats.red_flags_per_step.append(voting_result.red_flags)
+            stats.attempts_per_step.append(voting_result.total_attempts)
             logger.info(
                 "Step %d: move %s -> state %s",
                 step_index + 1,
