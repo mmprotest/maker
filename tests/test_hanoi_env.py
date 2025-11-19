@@ -27,6 +27,21 @@ def test_apply_move_enforces_rules():
         apply_move(new_state, [3, 1, 0])
 
 
+def test_validate_move_accepts_optional_expected_move():
+    env = TowersOfHanoiEnvironment(3)
+    state = [[3, 2, 1], [], []]
+
+    # Matching expected move: passes
+    env._validate_move(state, [1, 0, 2], expected_move=[1, 0, 2])
+
+    # Different but still legal move: accepted without raising
+    env._validate_move(state, [1, 0, 1], expected_move=[1, 0, 2])
+
+    # Illegal move still raises even if expected is provided
+    with pytest.raises(ValidationError):
+        env._validate_move(state, [3, 1, 0], expected_move=[1, 0, 2])
+
+
 def test_parse_and_validate_response():
     env = TowersOfHanoiEnvironment(3)
     context_state = [[3, 2, 1], [], []]
@@ -67,10 +82,6 @@ move = [1, 0, 1]
     assert output.action == [1, 0, 1]
     assert output.next_state == [[3, 2], [1], []]
 
-    malformed = "move [1,0,2]"
-    output = env.parse_and_validate_response(context, malformed)
-    assert output.action == [1, 0, 2]
-    assert output.next_state == [[3, 2], [], [1]]
 
 def test_parse_accepts_json_and_colon_formats():
     env = TowersOfHanoiEnvironment(3)

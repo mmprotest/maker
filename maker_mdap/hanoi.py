@@ -276,7 +276,7 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         return SubtaskOutput(action=move, next_state=next_state)
 
     def _validate_move(
-        self, state: list[list[int]], move: Any, expected_move: list[int]
+        self, state: list[list[int]], move: Any, expected_move: list[int] | None = None
     ) -> None:
         if not isinstance(move, list) or len(move) != 3 or not all(
             isinstance(x, int) for x in move
@@ -295,6 +295,13 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ValidationError("Disk not on top of source peg")
         if state[target_peg] and state[target_peg][-1] < disk_id:
             raise ValidationError("Cannot place larger disk on smaller disk")
+
+        if expected_move is not None and move != expected_move:
+            logger.debug(
+                "Model move differs from provided expected move; accepting legal move instead. expected=%s actual=%s",
+                expected_move,
+                move,
+            )
 
     def _validate_state(self, state: Any) -> None:
         if not isinstance(state, list) or len(state) != 3:
