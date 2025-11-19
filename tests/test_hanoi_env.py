@@ -4,7 +4,6 @@ from maker_mdap.core import ParseError, ValidationError
 from maker_mdap.hanoi import (
     TowersOfHanoiEnvironment,
     apply_move,
-    compute_deterministic_sequence,
     is_goal_state,
     make_initial_state,
 )

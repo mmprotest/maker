@@ -194,13 +194,6 @@ def run_voting_for_step(
                 red_flag_reason,
             )
             if voting.red_flags > maker_config.max_red_flag_retries_per_step:
-                fallback = getattr(env, "fallback_output", None)
-                if callable(fallback):
-                    logger.warning(
-                        "Red-flag limit exceeded; using fallback output for step %d",
-                        context.step_index,
-                    )
-                    return fallback(context)
                 raise VoteLimitExceededError(
                     "Exceeded maximum red-flag retries for step"
                 )
@@ -223,14 +216,6 @@ def run_voting_for_step(
                 voting.red_flags,
             )
             return voting.candidates[leader_key]
-
-    fallback = getattr(env, "fallback_output", None)
-    if callable(fallback):
-        logger.warning(
-            "No winner found within vote limit; using fallback output for step %d",
-            context.step_index,
-        )
-        return fallback(context)
 
     raise VoteLimitExceededError("No winner found within vote limit")
 
