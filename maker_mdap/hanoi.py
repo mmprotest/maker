@@ -46,8 +46,10 @@ def is_goal_state(state: list[list[int]], num_disks: int) -> bool:
     return state == [[], [], list(range(num_disks, 0, -1))]
 
 
-def _clockwise_peg(peg: int) -> int:
-    return (peg + 1) % 3
+def _disk1_direction(num_disks: int) -> int:
+    """Return step direction for disk 1 based on disk parity."""
+
+    return -1 if num_disks % 2 == 1 else 1
 
 
 def _legal_moves(state: list[list[int]]) -> list[Tuple[int, int, int]]:
@@ -64,14 +66,14 @@ def _legal_moves(state: list[list[int]]) -> list[Tuple[int, int, int]]:
     return moves
 
 
-def _disk1_clockwise_move(state: list[list[int]]) -> list[int]:
+def _disk1_clockwise_move(state: list[list[int]], num_disks: int) -> list[int]:
     for peg_idx, peg in enumerate(state):
         if peg and peg[-1] == 1:
             src = peg_idx
             break
     else:
         raise ValidationError("Disk 1 not found on any peg")
-    target = _clockwise_peg(src)
+    target = (src + _disk1_direction(num_disks)) % 3
     if state[target] and state[target][-1] < 1:
         raise ValidationError("Illegal placement for disk 1")
     return [1, src, target]
@@ -85,7 +87,7 @@ def _only_legal_move_excluding_disk1(state: list[list[int]]) -> list[int]:
 
 
 def _deterministic_next_move(
-    state: list[list[int]], previous_move: list[int] | None
+    state: list[list[int]], previous_move: list[int] | None, num_disks: int
 ) -> list[int]:
     """Return the deterministic next move for the given ``state``.
 
@@ -96,7 +98,7 @@ def _deterministic_next_move(
     """
 
     if previous_move is None or previous_move[0] != 1:
-        return _disk1_clockwise_move(state)
+        return _disk1_clockwise_move(state, num_disks)
     return _only_legal_move_excluding_disk1(state)
 
 
@@ -109,7 +111,7 @@ def compute_deterministic_sequence(num_disks: int) -> list[Tuple[list[list[int]]
     total_steps = 2 ** num_disks - 1
 
     for _ in range(total_steps):
-        move = _deterministic_next_move(state, previous_move)
+        move = _deterministic_next_move(state, previous_move, num_disks)
         next_state = apply_move(state, move)
         sequence.append((state, move, next_state))
         state = next_state
@@ -138,61 +140,138 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
     def make_prompts(self, context: SubtaskContext) -> Tuple[str, str]:
         system_prompt = (
             "You are a precise agent solving Towers of Hanoi one move at a time.\n"
-            "Three pegs: 0, 1, 2. Disks: 1 is smallest, n is largest.\n"
-            "Rules: move one disk at a time from the top of a peg to the top of another; never place a larger disk on a smaller one.\n"
-            "Goal: move all disks from peg 0 to peg 2.\n"
-            "Strategy: if the previous move did not move disk 1, move disk 1 one peg clockwise (0->1->2->0). If the previous move did move disk 1, make the only legal move that does not involve disk 1.\n"
-            "Respond with only the next move and resulting state."
+            "Pegs are 0-indexed (the leftmost peg is 0).\n"
+            "Rules:\n"
+            "- Only one disk can be moved at a time.\n"
+            "- Only the top disk from any stack can be moved.\n"
+            "- A larger disk may not be placed on top of a smaller disk.\n"
+            "For all moves, follow the standard Tower of Hanoi procedure:\n"
+            "If the previous move did not move disk 1, move disk 1 clockwise one peg (0 -> 1 -> 2 -> 0).\n"
+            "If the previous move did move disk 1, make the only legal move that does not involve moving disk 1.\n"
+            "Use these clear steps to find the next move given the previous move and current state.\n"
+            "Ensure your answer includes a single next move in this EXACT FORMAT:\n"
+            "```move = [disk id, from peg, to peg]```\n"
+            "Ensure your answer includes the next state resulting from applying the move to the current state in this EXACT FORMAT:\n"
+            "```next_state = [[...], [...], [...]]```"
         )
         prev_move_str = (
             str(context.previous_action) if context.previous_action is not None else "<NONE>"
         )
         user_prompt = (
-            "Follow the rules above strictly.\n"
-            f"Previous move: {prev_move_str}\n"
-            f"Current state: {context.state}\n"
-            "Output exactly:\n"
-            "move = [disk_id, from_peg, to_peg]\n"
-            "next_state = [[...], [...], [...]]"
-        )
+            "Previous move: {previous_move}\n"
+            "Current State: {current_state}\n"
+            "Based on the previous move and current state, find the single next move that follows the procedure and the resulting next state."
+        ).format(previous_move=prev_move_str, current_state=context.state)
         return system_prompt, user_prompt
 
     def parse_and_validate_response(self, context: SubtaskContext, raw_response: str) -> SubtaskOutput:
-        move_line = None
-        state_line = None
-        for line in raw_response.strip().splitlines():
-            stripped = line.strip()
-            if stripped.startswith("move ="):
-                move_line = stripped
-            if stripped.startswith("next_state ="):
-                state_line = stripped
-        if move_line is None or state_line is None:
+        move_expr = self._extract_assignment_expr(raw_response, "move")
+        state_expr = self._extract_assignment_expr(raw_response, "next_state")
+        if move_expr is None or state_expr is None:
             raise ParseError("Missing move or next_state line")
         try:
-            move = ast.literal_eval(move_line.split("=", 1)[1].strip())
-            next_state = ast.literal_eval(state_line.split("=", 1)[1].strip())
+            move = ast.literal_eval(move_expr)
+            raw_state = ast.literal_eval(state_expr)
         except Exception as exc:  # noqa: BLE001
             raise ParseError(f"Failed to parse response: {exc}") from exc
 
-        self._validate_move(context.state, move)
-        expected_move = _deterministic_next_move(context.state, context.previous_action)
-        if move != expected_move:
-            raise ValidationError("Move does not follow deterministic strategy")
+        expected_move = _deterministic_next_move(
+            context.state, context.previous_action, self.num_disks
+        )
+        self._validate_move(context.state, move, expected_move)
         expected_state = apply_move(context.state, move)
+        next_state = self._normalize_state_representation(raw_state)
         self._validate_state(next_state)
         if expected_state != next_state:
             raise ValidationError("next_state does not match move applied to current state")
 
         return SubtaskOutput(action=move, next_state=next_state)
 
-    def fallback_output(self, context: SubtaskContext) -> SubtaskOutput:
-        """Return the deterministic next move when model output is unusable."""
+    def _normalize_state_representation(self, state: Any) -> list[list[int]]:
+        if not isinstance(state, list) or len(state) != 3:
+            raise ValidationError("State must be list of three lists")
+        normalized: list[list[int]] = []
+        for peg in state:
+            normalized.append(self._normalize_peg(peg))
+        return normalized
 
-        move = _deterministic_next_move(context.state, context.previous_action)
-        next_state = apply_move(context.state, move)
-        return SubtaskOutput(action=move, next_state=next_state)
+    def _normalize_peg(self, peg: Any) -> list[int]:
+        if not isinstance(peg, list):
+            raise ValidationError("Each peg must be a list")
+        if any(not isinstance(disk, int) for disk in peg):
+            raise ValidationError("All disks must be integers")
+        if len(peg) <= 1:
+            return peg.copy()
+        if self._is_strictly_descending(peg):
+            return peg.copy()
+        if self._is_strictly_ascending(peg):
+            return list(reversed(peg))
+        raise ValidationError("Disks on peg must be in strictly descending order")
 
-    def _validate_move(self, state: list[list[int]], move: Any) -> None:
+    @staticmethod
+    def _is_strictly_descending(values: list[int]) -> bool:
+        return all(values[i] > values[i + 1] for i in range(len(values) - 1))
+
+    @staticmethod
+    def _is_strictly_ascending(values: list[int]) -> bool:
+        return all(values[i] < values[i + 1] for i in range(len(values) - 1))
+
+    def _extract_assignment_expr(self, raw_response: str, key: str) -> str | None:
+        prefix = f"{key} ="
+        for line in raw_response.strip().splitlines():
+            stripped = self._strip_code_fence(line.strip())
+            if stripped.startswith(prefix):
+                parts = stripped.split("=", 1)
+                if len(parts) == 2:
+                    expr = parts[1].strip()
+                    if expr:
+                        return expr
+        return self._extract_assignment_expr_from_text(raw_response, prefix)
+
+    @staticmethod
+    def _strip_code_fence(line: str) -> str:
+        if line.startswith("```") and line.endswith("```") and len(line) > 6:
+            return line.strip("`").strip()
+        return line
+
+    def _extract_assignment_expr_from_text(self, raw: str, prefix: str) -> str | None:
+        idx = raw.find(prefix)
+        if idx == -1:
+            return None
+        idx += len(prefix)
+        while idx < len(raw) and raw[idx] in " `:\t":
+            idx += 1
+        if idx >= len(raw):
+            return None
+        if raw[idx] in "[{":
+            end = self._find_matching_bracket(raw, idx, raw[idx])
+        else:
+            end = idx
+            while end < len(raw) and raw[end] not in "\r\n`":
+                end += 1
+        expr = raw[idx:end].strip()
+        return expr or None
+
+    @staticmethod
+    def _find_matching_bracket(text: str, start: int, opening: str) -> int:
+        closing = "]" if opening == "[" else "}"
+        depth = 0
+        for idx in range(start, len(text)):
+            char = text[idx]
+            if char == opening:
+                depth += 1
+            elif char == closing:
+                depth -= 1
+                if depth == 0:
+                    return idx + 1
+        return len(text)
+
+    def _validate_move(
+        self,
+        state: list[list[int]],
+        move: Any,
+        expected_move: list[int] | None = None,
+    ) -> None:
         if not isinstance(move, list) or len(move) != 3 or not all(
             isinstance(x, int) for x in move
         ):
@@ -208,6 +287,8 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ValidationError("Source peg is empty")
         if state[source_peg][-1] != disk_id:
             raise ValidationError("Disk not on top of source peg")
+        if expected_move is not None and move != expected_move:
+            raise ValidationError("Move does not follow deterministic strategy")
 
     def _validate_state(self, state: Any) -> None:
         if not isinstance(state, list) or len(state) != 3:
