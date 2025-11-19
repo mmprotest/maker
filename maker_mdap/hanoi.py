@@ -52,6 +52,10 @@ def _clockwise_peg(peg: int) -> int:
     return (peg + 1) % 3
 
 
+def _counterclockwise_peg(peg: int) -> int:
+    return (peg + 2) % 3
+
+
 def _legal_moves(state: list[list[int]]) -> list[Tuple[int, int, int]]:
     moves: list[Tuple[int, int, int]] = []
     for src in range(3):
@@ -66,14 +70,21 @@ def _legal_moves(state: list[list[int]]) -> list[Tuple[int, int, int]]:
     return moves
 
 
-def _disk1_clockwise_move(state: list[list[int]]) -> list[int]:
+def _disk1_direction(num_disks: int) -> str:
+    """Return the movement direction for disk 1 (clockwise/counterclockwise)."""
+
+    return "clockwise" if num_disks % 2 == 0 else "counterclockwise"
+
+
+def _disk1_directional_move(state: list[list[int]], num_disks: int) -> list[int]:
     for peg_idx, peg in enumerate(state):
         if peg and peg[-1] == 1:
             src = peg_idx
             break
     else:
         raise ValidationError("Disk 1 not found on any peg")
-    target = _clockwise_peg(src)
+    direction = _disk1_direction(num_disks)
+    target = _clockwise_peg(src) if direction == "clockwise" else _counterclockwise_peg(src)
     if state[target] and state[target][-1] < 1:
         raise ValidationError("Illegal placement for disk 1")
     return [1, src, target]
@@ -87,7 +98,7 @@ def _only_legal_move_excluding_disk1(state: list[list[int]]) -> list[int]:
 
 
 def _deterministic_next_move(
-    state: list[list[int]], previous_move: list[int] | None
+    state: list[list[int]], previous_move: list[int] | None, num_disks: int
 ) -> list[int]:
     """Return the deterministic next move for the given ``state``.
 
@@ -98,7 +109,7 @@ def _deterministic_next_move(
     """
 
     if previous_move is None or previous_move[0] != 1:
-        return _disk1_clockwise_move(state)
+        return _disk1_directional_move(state, num_disks)
     return _only_legal_move_excluding_disk1(state)
 
 
@@ -111,7 +122,7 @@ def compute_deterministic_sequence(num_disks: int) -> list[Tuple[list[list[int]]
     total_steps = 2 ** num_disks - 1
 
     for _ in range(total_steps):
-        move = _deterministic_next_move(state, previous_move)
+        move = _deterministic_next_move(state, previous_move, num_disks)
         next_state = apply_move(state, move)
         sequence.append((state, move, next_state))
         state = next_state
@@ -143,6 +154,7 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             "Three pegs: 0, 1, 2. Disks: 1 is smallest, n is largest.\n"
             "Rules: move one disk at a time from the top of a peg to the top of another; never place a larger disk on a smaller one.\n"
             "Goal: move all disks from peg 0 to peg 2.\n"
+            "Use the optimal iterative strategy: move disk 1 in the same direction every other turn (clockwise when the number of disks is even, counterclockwise when odd); between those moves, make the only legal move that does not use disk 1.\n"
             "Respond ONLY with a single JSON object, no prose or explanations, in the form:\n"
             '{"move": [disk_id, from_peg, to_peg], "next_state": [[...], [...], [...]]}\n'
             "The \"next_state\" field is optional; the system will compute it from your move."
@@ -166,7 +178,10 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ParseError("Missing move line")
         move, next_state = parsed
 
-        self._validate_move(context.state, move)
+        expected_move = _deterministic_next_move(
+            context.state, context.previous_action, self.num_disks
+        )
+        self._validate_move(context.state, move, expected_move)
         expected_state = apply_move(context.state, move)
 
         if next_state is not None:
@@ -254,81 +269,18 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
 
         return None
 
-    def _extract_move_and_state(self, raw_response: str) -> tuple[list[int], list[list[int]]] | None:
-        """Parse model output tolerantly while enforcing structured content."""
-
-        cleaned = raw_response.strip()
-        cleaned = re.sub(r"^```[a-zA-Z]*\n|\n```$", "", cleaned, flags=re.MULTILINE)
-
-        # 1) Strict "move = ..." format
-        move_line = None
-        state_line = None
-        for line in cleaned.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("move ="):
-                move_line = stripped.split("=", 1)[1].strip()
-            if stripped.startswith("next_state ="):
-                state_line = stripped.split("=", 1)[1].strip()
-        if move_line and state_line:
-            try:
-                move = ast.literal_eval(move_line)
-                next_state = ast.literal_eval(state_line)
-                return move, next_state
-            except Exception:  # noqa: BLE001
-                pass
-
-        # 2) JSON/dict style payload
-        dict_like = None
-        if cleaned.startswith("{") or cleaned.startswith("["):
-            dict_like = cleaned
-        else:
-            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-            if match:
-                dict_like = match.group(0)
-        if dict_like:
-            try:
-                payload = ast.literal_eval(dict_like)
-                if isinstance(payload, dict) and "move" in payload and "next_state" in payload:
-                    return payload["move"], payload["next_state"]
-            except Exception:  # noqa: BLE001
-                pass
-
-        # 3) Labeled lines with ":" delimiter
-        move_match = re.search(r"move\s*:\s*(\[.*?\])", cleaned, re.DOTALL)
-        state_match = re.search(r"next_state\s*:\s*(\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\])", cleaned, re.DOTALL)
-        if move_match and state_match:
-            try:
-                move = ast.literal_eval(move_match.group(1))
-                next_state = ast.literal_eval(state_match.group(1))
-                return move, next_state
-            except Exception:  # noqa: BLE001
-                pass
-
-        # 4) Fallback: first list of three ints + first triple-peg state
-        move_match = re.search(r"\[\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\]", cleaned)
-        state_match = re.search(
-            r"\[\s*\[.*?\]\s*,\s*\[.*?\]\s*,\s*\[.*?\]\s*\]",
-            cleaned,
-            re.DOTALL,
-        )
-        if move_match and state_match:
-            try:
-                move = ast.literal_eval(move_match.group(0))
-                next_state = ast.literal_eval(state_match.group(0))
-                return move, next_state
-            except Exception:  # noqa: BLE001
-                pass
-
-        return None
-
     def fallback_output(self, context: SubtaskContext) -> SubtaskOutput:
         """Return the deterministic next move when model output is unusable."""
 
-        move = _deterministic_next_move(context.state, context.previous_action)
+        move = _deterministic_next_move(
+            context.state, context.previous_action, self.num_disks
+        )
         next_state = apply_move(context.state, move)
         return SubtaskOutput(action=move, next_state=next_state)
 
-    def _validate_move(self, state: list[list[int]], move: Any) -> None:
+    def _validate_move(
+        self, state: list[list[int]], move: Any, expected_move: list[int]
+    ) -> None:
         if not isinstance(move, list) or len(move) != 3 or not all(
             isinstance(x, int) for x in move
         ):
@@ -344,6 +296,8 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ValidationError("Source peg is empty")
         if state[source_peg][-1] != disk_id:
             raise ValidationError("Disk not on top of source peg")
+        if move != expected_move:
+            raise ValidationError("Move must follow deterministic optimal policy")
 
     def _validate_state(self, state: Any) -> None:
         if not isinstance(state, list) or len(state) != 3:
