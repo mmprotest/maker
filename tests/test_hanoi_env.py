@@ -45,6 +45,30 @@ next_state = [[3, 1], [2], []]
         env.parse_and_validate_response(context, malformed)
 
 
+def test_parse_accepts_json_and_colon_formats():
+    env = TowersOfHanoiEnvironment(3)
+    context_state = [[3, 2, 1], [], []]
+    context = type("Ctx", (), {"step_index": 0, "state": context_state, "previous_action": None})
+
+    json_payload = """
+```json
+{"move": [1, 0, 1], "next_state": [[3, 2], [1], []]}
+```
+"""
+    output = env.parse_and_validate_response(context, json_payload)
+    assert output.action == [1, 0, 1]
+    assert output.next_state == [[3, 2], [1], []]
+
+    colon_payload = """
+Next action below:
+move: [1, 0, 1]
+next_state: [[3, 2], [1], []]
+"""
+    output = env.parse_and_validate_response(context, colon_payload)
+    assert output.action == [1, 0, 1]
+    assert output.next_state == [[3, 2], [1], []]
+
+
 def test_parse_rejects_moves_that_break_deterministic_strategy():
     env = TowersOfHanoiEnvironment(3)
     context_state = [[3, 2], [1], []]

@@ -105,6 +105,12 @@ class VotingResult:
         self.red_flags: int = 0
         self.total_votes: int = 0
 
+    @property
+    def total_attempts(self) -> int:
+        """Total model calls made, including red-flagged responses."""
+
+        return self.total_votes + self.red_flags
+
     def record_vote(self, key: str, output: SubtaskOutput) -> None:
         self.total_votes += 1
         self.vote_counts[key] = self.vote_counts.get(key, 0) + 1
@@ -130,6 +136,7 @@ class RunStats:
 
     votes_per_step: list[int]
     red_flags_per_step: list[int]
+    attempts_per_step: list[int]
 
 
 def run_voting_for_step(
@@ -148,7 +155,7 @@ def run_voting_for_step(
     red_flagger = RedFlagger(env, maker_config)
     voting = result if result is not None else VotingResult()
 
-    while voting.total_votes < maker_config.max_votes_per_step:
+    while voting.total_attempts < maker_config.max_votes_per_step:
         system_prompt, user_prompt = env.make_prompts(context)
         temperature = (
             temperature_first_vote
@@ -224,7 +231,7 @@ class MAKERRunner:
         previous_action = None
         step_index = 0
         outputs: list[SubtaskOutput] = []
-        stats = RunStats(votes_per_step=[], red_flags_per_step=[])
+        stats = RunStats(votes_per_step=[], red_flags_per_step=[], attempts_per_step=[])
 
         while not self.env.is_terminal(state, step_index):
             if max_steps is not None and step_index >= max_steps:
@@ -245,6 +252,7 @@ class MAKERRunner:
             outputs.append(output)
             stats.votes_per_step.append(voting_result.total_votes)
             stats.red_flags_per_step.append(voting_result.red_flags)
+            stats.attempts_per_step.append(voting_result.total_attempts)
             logger.info(
                 "Step %d: move %s -> state %s",
                 step_index + 1,
