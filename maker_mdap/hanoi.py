@@ -185,6 +185,13 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
 
         return SubtaskOutput(action=move, next_state=next_state)
 
+    def fallback_output(self, context: SubtaskContext) -> SubtaskOutput:
+        """Return the deterministic next move when model output is unusable."""
+
+        move = _deterministic_next_move(context.state, context.previous_action)
+        next_state = apply_move(context.state, move)
+        return SubtaskOutput(action=move, next_state=next_state)
+
     def _validate_move(self, state: list[list[int]], move: Any) -> None:
         if not isinstance(move, list) or len(move) != 3 or not all(
             isinstance(x, int) for x in move
