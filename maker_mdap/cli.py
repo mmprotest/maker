@@ -83,9 +83,15 @@ def solve(
     if runner.last_run_stats:
         votes = runner.last_run_stats.votes_per_step
         red_flags = runner.last_run_stats.red_flags_per_step
+        attempts = runner.last_run_stats.attempts_per_step
         if votes:
             typer.echo(
                 f"Votes per step: min={min(votes)}, max={max(votes)}, mean={sum(votes)/len(votes):.2f}"
+            )
+        if attempts:
+            typer.echo(
+                "Model calls per step (votes + red flags): "
+                f"min={min(attempts)}, max={max(attempts)}, mean={sum(attempts)/len(attempts):.2f}"
             )
         typer.echo(f"Total red flagged responses: {sum(red_flags)}")
 
