@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import ast
+import logging
+import re
 from typing import Any, Tuple
 
 from .core import ParseError, SubtaskContext, SubtaskOutput, TaskEnvironment, ValidationError
@@ -310,4 +312,6 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         expected = list(range(1, self.num_disks + 1))
         if sorted(all_disks) != expected:
             raise ValidationError("State must include each disk exactly once")
+
+logger = logging.getLogger(__name__)
 
