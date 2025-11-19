@@ -138,23 +138,28 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
     def make_prompts(self, context: SubtaskContext) -> Tuple[str, str]:
         system_prompt = (
             "You are a precise agent solving Towers of Hanoi one move at a time.\n"
-            "Three pegs: 0, 1, 2. Disks: 1 is smallest, n is largest.\n"
-            "Rules: move one disk at a time from the top of a peg to the top of another; never place a larger disk on a smaller one.\n"
-            "Goal: move all disks from peg 0 to peg 2.\n"
-            "Strategy: if the previous move did not move disk 1, move disk 1 one peg clockwise (0->1->2->0). If the previous move did move disk 1, make the only legal move that does not involve disk 1.\n"
-            "Respond with only the next move and resulting state."
+            "Pegs are 0-indexed (the leftmost peg is 0).\n"
+            "Rules:\n"
+            "- Only one disk can be moved at a time.\n"
+            "- Only the top disk from any stack can be moved.\n"
+            "- A larger disk may not be placed on top of a smaller disk.\n"
+            "For all moves, follow the standard Tower of Hanoi procedure:\n"
+            "If the previous move did not move disk 1, move disk 1 clockwise one peg (0 -> 1 -> 2 -> 0).\n"
+            "If the previous move did move disk 1, make the only legal move that does not involve moving disk 1.\n"
+            "Use these clear steps to find the next move given the previous move and current state.\n"
+            "Ensure your answer includes a single next move in this EXACT FORMAT:\n"
+            "```move = [disk id, from peg, to peg]```\n"
+            "Ensure your answer includes the next state resulting from applying the move to the current state in this EXACT FORMAT:\n"
+            "```next_state = [[...], [...], [...]]```"
         )
         prev_move_str = (
             str(context.previous_action) if context.previous_action is not None else "<NONE>"
         )
         user_prompt = (
-            "Follow the rules above strictly.\n"
-            f"Previous move: {prev_move_str}\n"
-            f"Current state: {context.state}\n"
-            "Output exactly:\n"
-            "move = [disk_id, from_peg, to_peg]\n"
-            "next_state = [[...], [...], [...]]"
-        )
+            "Previous move: {previous_move}\n"
+            "Current State: {current_state}\n"
+            "Based on the previous move and current state, find the single next move that follows the procedure and the resulting next state."
+        ).format(previous_move=prev_move_str, current_state=context.state)
         return system_prompt, user_prompt
 
     def parse_and_validate_response(self, context: SubtaskContext, raw_response: str) -> SubtaskOutput:
@@ -174,10 +179,8 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         except Exception as exc:  # noqa: BLE001
             raise ParseError(f"Failed to parse response: {exc}") from exc
 
-        self._validate_move(context.state, move)
         expected_move = _deterministic_next_move(context.state, context.previous_action)
-        if move != expected_move:
-            raise ValidationError("Move does not follow deterministic strategy")
+        self._validate_move(context.state, move, expected_move)
         expected_state = apply_move(context.state, move)
         self._validate_state(next_state)
         if expected_state != next_state:
@@ -185,14 +188,12 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
 
         return SubtaskOutput(action=move, next_state=next_state)
 
-    def fallback_output(self, context: SubtaskContext) -> SubtaskOutput:
-        """Return the deterministic next move when model output is unusable."""
-
-        move = _deterministic_next_move(context.state, context.previous_action)
-        next_state = apply_move(context.state, move)
-        return SubtaskOutput(action=move, next_state=next_state)
-
-    def _validate_move(self, state: list[list[int]], move: Any) -> None:
+    def _validate_move(
+        self,
+        state: list[list[int]],
+        move: Any,
+        expected_move: list[int] | None = None,
+    ) -> None:
         if not isinstance(move, list) or len(move) != 3 or not all(
             isinstance(x, int) for x in move
         ):
@@ -208,6 +209,8 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ValidationError("Source peg is empty")
         if state[source_peg][-1] != disk_id:
             raise ValidationError("Disk not on top of source peg")
+        if expected_move is not None and move != expected_move:
+            raise ValidationError("Move does not follow deterministic strategy")
 
     def _validate_state(self, state: Any) -> None:
         if not isinstance(state, list) or len(state) != 3:

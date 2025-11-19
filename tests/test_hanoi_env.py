@@ -1,7 +1,12 @@
 import pytest
 
 from maker_mdap.core import ParseError, ValidationError
-from maker_mdap.hanoi import TowersOfHanoiEnvironment, apply_move, is_goal_state, make_initial_state
+from maker_mdap.hanoi import (
+    TowersOfHanoiEnvironment,
+    apply_move,
+    is_goal_state,
+    make_initial_state,
+)
 
 
 def test_initial_state_and_goal_detection():
