@@ -140,6 +140,11 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         return str(state)
 
     def make_prompts(self, context: SubtaskContext) -> Tuple[str, str]:
+        disk1_rule = (
+            "If the previous move did not move disk 1, move disk 1 counter-clockwise one peg (0 -> 2 -> 1 -> 0).\n"
+            if self.num_disks % 2 == 1
+            else "If the previous move did not move disk 1, move disk 1 clockwise one peg (0 -> 1 -> 2 -> 0).\n"
+        )
         system_prompt = (
             "You are a precise agent solving Towers of Hanoi one move at a time.\n"
             "Pegs are 0-indexed (the leftmost peg is 0).\n"
@@ -148,7 +153,7 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             "- Only the top disk from any stack can be moved.\n"
             "- A larger disk may not be placed on top of a smaller disk.\n"
             "For all moves, follow the standard Tower of Hanoi procedure:\n"
-            "If the previous move did not move disk 1, move disk 1 clockwise one peg (0 -> 1 -> 2 -> 0).\n"
+            f"{disk1_rule}"
             "If the previous move did move disk 1, make the only legal move that does not involve moving disk 1.\n"
             "Use these clear steps to find the next move given the previous move and current state.\n"
             "Ensure your answer includes a single next move in this EXACT FORMAT:\n"
