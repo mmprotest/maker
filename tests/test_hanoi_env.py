@@ -1,7 +1,12 @@
 import pytest
 
 from maker_mdap.core import ParseError, ValidationError
-from maker_mdap.hanoi import TowersOfHanoiEnvironment, apply_move, is_goal_state, make_initial_state
+from maker_mdap.hanoi import (
+    TowersOfHanoiEnvironment,
+    apply_move,
+    is_goal_state,
+    make_initial_state,
+)
 
 
 def test_initial_state_and_goal_detection():
@@ -30,6 +35,21 @@ move = [1, 0, 1]
 next_state = [[3, 2], [1], []]
 """
     output = env.parse_and_validate_response(context, raw)
+    assert output.action == [1, 0, 1]
+    assert output.next_state == [[3, 2], [1], []]
+
+    fenced_raw = """
+Here is the move:
+```move = [1, 0, 1]```
+And the state:
+```next_state = [[3, 2], [1], []]```
+"""
+    output = env.parse_and_validate_response(context, fenced_raw)
+    assert output.action == [1, 0, 1]
+    assert output.next_state == [[3, 2], [1], []]
+
+    inline_raw = """Narration before the move ```move = [1, 0, 1]``` and even more narration before declaring ```next_state = [[3, 2], [1], []]```"""
+    output = env.parse_and_validate_response(context, inline_raw)
     assert output.action == [1, 0, 1]
     assert output.next_state == [[3, 2], [1], []]
 
