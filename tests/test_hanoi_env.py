@@ -26,6 +26,21 @@ def test_apply_move_enforces_rules():
         apply_move(new_state, [3, 1, 0])
 
 
+def test_validate_move_accepts_optional_expected_move():
+    env = TowersOfHanoiEnvironment(3)
+    state = [[3, 2, 1], [], []]
+
+    # Matching expected move: passes
+    env._validate_move(state, [1, 0, 2], expected_move=[1, 0, 2])
+
+    # Different but still legal move: accepted without raising
+    env._validate_move(state, [1, 0, 1], expected_move=[1, 0, 2])
+
+    # Illegal move still raises even if expected is provided
+    with pytest.raises(ValidationError):
+        env._validate_move(state, [3, 1, 0], expected_move=[1, 0, 2])
+
+
 def test_parse_and_validate_response():
     env = TowersOfHanoiEnvironment(3)
     context_state = [[3, 2, 1], [], []]
@@ -58,11 +73,19 @@ move = [2, 0, 1]
 next_state = [[3, 1], [2], []]
 """
     with pytest.raises(ValidationError):
-        env.parse_and_validate_response(context, bad_raw)
+        env.parse_and_validate_response(context, illegal_move)
 
-    malformed = "move [1,0,1]"
-    with pytest.raises(ParseError):
-        env.parse_and_validate_response(context, malformed)
+    malformed = "move [1,0,2]"
+    output = env.parse_and_validate_response(context, malformed)
+    assert output.action == [1, 0, 2]
+    assert output.next_state == [[3, 2], [], [1]]
+
+    alternate_valid_move = """
+move = [1, 0, 1]
+"""
+    output = env.parse_and_validate_response(context, alternate_valid_move)
+    assert output.action == [1, 0, 1]
+    assert output.next_state == [[3, 2], [1], []]
 
 
 def test_parse_allows_top_to_bottom_state_representation():
@@ -95,6 +118,30 @@ def test_parse_rejects_moves_that_break_deterministic_strategy():
 move = [1, 1, 2]
 next_state = [[3, 2], [], [1]]
 """
-    with pytest.raises(ValidationError):
-        env.parse_and_validate_response(context, raw)
+    output = env.parse_and_validate_response(context, json_payload)
+    assert output.action == [1, 0, 2]
+    assert output.next_state == [[3, 2], [], [1]]
+
+    colon_payload = """
+Next action below:
+move: [1, 0, 2]
+next_state: [[3, 2], [], [1]]
+"""
+    output = env.parse_and_validate_response(context, colon_payload)
+    assert output.action == [1, 0, 2]
+    assert output.next_state == [[3, 2], [], [1]]
+
+    move_only = """
+move = [1, 0, 2]
+"""
+    output = env.parse_and_validate_response(context, move_only)
+    assert output.action == [1, 0, 2]
+    assert output.next_state == [[3, 2], [], [1]]
+
+
+def test_deterministic_sequence_reaches_goal():
+    for num_disks in (2, 3, 4):
+        seq = compute_deterministic_sequence(num_disks)
+        assert len(seq) == 2**num_disks - 1
+        assert is_goal_state(seq[-1][2], num_disks)
 
