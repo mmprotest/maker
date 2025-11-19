@@ -63,6 +63,21 @@ And the state:
     assert output.action == [1, 0, 1]
     assert output.next_state == [[3, 2], [1], []]
 
+    fenced_raw = """
+Here is the move:
+```move = [1, 0, 1]```
+And the state:
+```next_state = [[3, 2], [1], []]```
+"""
+    output = env.parse_and_validate_response(context, fenced_raw)
+    assert output.action == [1, 0, 1]
+    assert output.next_state == [[3, 2], [1], []]
+
+    inline_raw = """Narration before the move ```move = [1, 0, 1]``` and even more narration before declaring ```next_state = [[3, 2], [1], []]```"""
+    output = env.parse_and_validate_response(context, inline_raw)
+    assert output.action == [1, 0, 1]
+    assert output.next_state == [[3, 2], [1], []]
+
     bad_raw = """
 move = [2, 0, 1]
 next_state = [[3, 1], [2], []]

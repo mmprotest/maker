@@ -176,52 +176,13 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         return system_prompt, user_prompt
 
     def parse_and_validate_response(self, context: SubtaskContext, raw_response: str) -> SubtaskOutput:
-        parsed = self._extract_move_and_state(raw_response)
-        if parsed is None:
-            raise ParseError("Missing move line")
-        move, next_state = parsed
-
-        self._validate_move(context.state, move)
-        expected_state = apply_move(context.state, move)
-
-        if next_state is not None:
-            try:
-                self._validate_state(next_state)
-                if expected_state != next_state:
-                    logger.debug(
-                        "Model next_state mismatch; using computed state instead. expected=%s model=%s",
-                        expected_state,
-                        next_state,
-                    )
-            except ValidationError as exc:
-                logger.debug("Ignoring invalid next_state from model: %s", exc)
-
-        return SubtaskOutput(action=move, next_state=expected_state)
-
-    def _extract_move_and_state(
-        self, raw_response: str
-    ) -> tuple[list[int], list[list[int]] | None] | None:
-        """Parse model output tolerantly while enforcing structured content."""
-
-        cleaned = raw_response.strip()
-        cleaned = re.sub(r"^```[a-zA-Z]*\n|\n```$", "", cleaned, flags=re.MULTILINE)
-
-        # 1) Strict "move = ..." format
-        move_line = None
-        state_line = None
-        for line in cleaned.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("```") and stripped.endswith("```") and len(stripped) > 6:
-                stripped = stripped.strip("`").strip()
-            if stripped.startswith("move ="):
-                move_line = stripped.split("=", 1)[1].strip()
-            if stripped.startswith("next_state ="):
-                state_line = stripped
-        if move_line is None or state_line is None:
+        move_expr = self._extract_assignment_expr(raw_response, "move")
+        state_expr = self._extract_assignment_expr(raw_response, "next_state")
+        if move_expr is None or state_expr is None:
             raise ParseError("Missing move or next_state line")
         try:
-            move = ast.literal_eval(move_line.split("=", 1)[1].strip())
-            next_state = ast.literal_eval(state_line.split("=", 1)[1].strip())
+            move = ast.literal_eval(move_expr)
+            next_state = ast.literal_eval(state_expr)
         except Exception as exc:  # noqa: BLE001
             raise ParseError(f"Failed to parse response: {exc}") from exc
 
@@ -233,6 +194,56 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ValidationError("next_state does not match move applied to current state")
 
         return SubtaskOutput(action=move, next_state=next_state)
+
+    def _extract_assignment_expr(self, raw_response: str, key: str) -> str | None:
+        prefix = f"{key} ="
+        for line in raw_response.strip().splitlines():
+            stripped = self._strip_code_fence(line.strip())
+            if stripped.startswith(prefix):
+                parts = stripped.split("=", 1)
+                if len(parts) == 2:
+                    expr = parts[1].strip()
+                    if expr:
+                        return expr
+        return self._extract_assignment_expr_from_text(raw_response, prefix)
+
+    @staticmethod
+    def _strip_code_fence(line: str) -> str:
+        if line.startswith("```") and line.endswith("```") and len(line) > 6:
+            return line.strip("`").strip()
+        return line
+
+    def _extract_assignment_expr_from_text(self, raw: str, prefix: str) -> str | None:
+        idx = raw.find(prefix)
+        if idx == -1:
+            return None
+        idx += len(prefix)
+        while idx < len(raw) and raw[idx] in " `:\t":
+            idx += 1
+        if idx >= len(raw):
+            return None
+        if raw[idx] in "[{":
+            end = self._find_matching_bracket(raw, idx, raw[idx])
+        else:
+            end = idx
+            while end < len(raw) and raw[end] not in "\r\n`":
+                end += 1
+        expr = raw[idx:end].strip()
+        return expr or None
+
+    @staticmethod
+    def _find_matching_bracket(text: str, start: int, opening: str) -> int:
+        closing = "]" if opening == "[" else "}"
+        depth = 0
+        for idx in range(start, len(text)):
+            char = text[idx]
+            if char == opening:
+                depth += 1
+            elif char == closing:
+                depth -= 1
+                if depth == 0:
+                    return idx + 1
+        return len(text)
 
     def _validate_move(
         self,
