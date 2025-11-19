@@ -67,6 +67,10 @@ move = [1, 0, 1]
     assert output.action == [1, 0, 1]
     assert output.next_state == [[3, 2], [1], []]
 
+    malformed = "move [1,0,2]"
+    output = env.parse_and_validate_response(context, malformed)
+    assert output.action == [1, 0, 2]
+    assert output.next_state == [[3, 2], [], [1]]
 
 def test_parse_accepts_json_and_colon_formats():
     env = TowersOfHanoiEnvironment(3)

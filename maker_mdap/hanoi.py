@@ -275,7 +275,9 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         next_state = apply_move(context.state, move)
         return SubtaskOutput(action=move, next_state=next_state)
 
-    def _validate_move(self, state: list[list[int]], move: Any) -> None:
+    def _validate_move(
+        self, state: list[list[int]], move: Any, expected_move: list[int]
+    ) -> None:
         if not isinstance(move, list) or len(move) != 3 or not all(
             isinstance(x, int) for x in move
         ):
