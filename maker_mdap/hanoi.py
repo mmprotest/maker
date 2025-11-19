@@ -145,9 +145,14 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             if self.num_disks % 2 == 1
             else "If the previous move did not move disk 1, move disk 1 clockwise one peg (0 -> 1 -> 2 -> 0).\n"
         )
+        peg_description = " | ".join(
+            f"peg {idx}: {peg if peg else 'empty'} (top={peg[-1] if peg else 'none'})"
+            for idx, peg in enumerate(context.state)
+        )
         system_prompt = (
             "You are a precise agent solving Towers of Hanoi one move at a time.\n"
             "Pegs are 0-indexed (the leftmost peg is 0).\n"
+            "Disk numbering matches size: disk 1 is the smallest and must always remain on top of any larger disk on a peg.\n"
             "Rules:\n"
             "- Only one disk can be moved at a time.\n"
             "- Only the top disk from any stack can be moved.\n"
@@ -155,6 +160,7 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             "For all moves, follow the standard Tower of Hanoi procedure:\n"
             f"{disk1_rule}"
             "If the previous move did move disk 1, make the only legal move that does not involve moving disk 1.\n"
+            "That non-disk-1 move is determined solely by the two exposed top disks; choose the single legal placement that respects size ordering.\n"
             "Use these clear steps to find the next move given the previous move and current state.\n"
             "Ensure your answer includes a single next move in this EXACT FORMAT:\n"
             "```move = [disk id, from peg, to peg]```\n"
@@ -167,8 +173,13 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
         user_prompt = (
             "Previous move: {previous_move}\n"
             "Current State: {current_state}\n"
+            "Top disks summary: {peg_description}\n"
             "Based on the previous move and current state, find the single next move that follows the procedure and the resulting next state."
-        ).format(previous_move=prev_move_str, current_state=context.state)
+        ).format(
+            previous_move=prev_move_str,
+            current_state=context.state,
+            peg_description=peg_description,
+        )
         return system_prompt, user_prompt
 
     def parse_and_validate_response(self, context: SubtaskContext, raw_response: str) -> SubtaskOutput:
@@ -290,6 +301,8 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ValidationError("Peg indices must be 0,1,2")
         if source_peg == target_peg:
             raise ValidationError("Source and target cannot be the same")
+        if expected_move is not None and move != expected_move:
+            raise ValidationError("Move does not follow deterministic strategy")
         if not state[source_peg]:
             raise ValidationError("Source peg is empty")
         if state[source_peg][-1] != disk_id:

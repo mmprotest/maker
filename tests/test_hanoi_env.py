@@ -122,6 +122,23 @@ next_state = [[], [], [1, 2]]
     assert output.next_state == [[], [], [2, 1]]
 
 
+def test_parse_allows_top_to_bottom_state_representation():
+    env = TowersOfHanoiEnvironment(2)
+    context_state = [[], [1], [2]]
+    context = type(
+        "Ctx",
+        (),
+        {"step_index": 2, "state": context_state, "previous_action": [2, 0, 1]},
+    )
+    raw = """
+move = [1, 1, 2]
+next_state = [[], [], [1, 2]]
+"""
+    output = env.parse_and_validate_response(context, raw)
+    assert output.action == [1, 1, 2]
+    assert output.next_state == [[], [], [2, 1]]
+
+
 def test_parse_rejects_moves_that_break_deterministic_strategy():
     env = TowersOfHanoiEnvironment(3)
     context_state = [[3, 2], [], [1]]
