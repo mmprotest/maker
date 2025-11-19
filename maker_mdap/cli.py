@@ -59,7 +59,7 @@ def solve(
     max_steps: Optional[int] = typer.Option(
         None,
         "--max-steps",
-        help="Maximum steps to allow before aborting (defaults to optimal steps)",
+        help="Maximum steps to allow before aborting (defaults to unlimited)",
     ),
 ):
     """Solve a Towers of Hanoi instance using MAKER."""
@@ -72,7 +72,6 @@ def solve(
     runner = MAKERRunner(env=env, llm=llm, maker_config=maker_config)
 
     optimal_steps = 2 ** num_disks - 1
-    max_steps = max_steps or optimal_steps
     typer.echo(f"Optimal number of steps: {optimal_steps}")
     outputs = runner.run_full_task(max_steps=max_steps)
     final_state = outputs[-1].next_state if outputs else env.initial_state()
