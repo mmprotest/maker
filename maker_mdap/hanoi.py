@@ -84,6 +84,22 @@ def _only_legal_move_excluding_disk1(state: list[list[int]]) -> list[int]:
     return list(moves[0])
 
 
+def _deterministic_next_move(
+    state: list[list[int]], previous_move: list[int] | None
+) -> list[int]:
+    """Return the deterministic next move for the given ``state``.
+
+    The strategy alternates moving disk 1 clockwise and making the only legal
+    non-disk-1 move, which guarantees optimal progress toward the goal. This is
+    pure state-based logic, so it can be used to both generate the reference
+    solution and validate model outputs.
+    """
+
+    if previous_move is None or previous_move[0] != 1:
+        return _disk1_clockwise_move(state)
+    return _only_legal_move_excluding_disk1(state)
+
+
 def compute_deterministic_sequence(num_disks: int) -> list[Tuple[list[list[int]], list[int], list[list[int]]]]:
     """Compute the full optimal move sequence using the deterministic strategy."""
 
@@ -93,10 +109,7 @@ def compute_deterministic_sequence(num_disks: int) -> list[Tuple[list[list[int]]
     total_steps = 2 ** num_disks - 1
 
     for _ in range(total_steps):
-        if previous_move is None or previous_move[0] != 1:
-            move = _disk1_clockwise_move(state)
-        else:
-            move = _only_legal_move_excluding_disk1(state)
+        move = _deterministic_next_move(state, previous_move)
         next_state = apply_move(state, move)
         sequence.append((state, move, next_state))
         state = next_state
@@ -162,6 +175,9 @@ class TowersOfHanoiEnvironment(TaskEnvironment):
             raise ParseError(f"Failed to parse response: {exc}") from exc
 
         self._validate_move(context.state, move)
+        expected_move = _deterministic_next_move(context.state, context.previous_action)
+        if move != expected_move:
+            raise ValidationError("Move does not follow deterministic strategy")
         expected_state = apply_move(context.state, move)
         self._validate_state(next_state)
         if expected_state != next_state:

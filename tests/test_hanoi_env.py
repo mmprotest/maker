@@ -44,3 +44,16 @@ next_state = [[3, 1], [2], []]
     with pytest.raises(ParseError):
         env.parse_and_validate_response(context, malformed)
 
+
+def test_parse_rejects_moves_that_break_deterministic_strategy():
+    env = TowersOfHanoiEnvironment(3)
+    context_state = [[3, 2], [1], []]
+    context = type("Ctx", (), {"step_index": 1, "state": context_state, "previous_action": [1, 0, 1]})
+    # Moving disk 1 again is legal but violates the enforced deterministic strategy
+    raw = """
+move = [1, 1, 2]
+next_state = [[3, 2], [], [1]]
+"""
+    with pytest.raises(ValidationError):
+        env.parse_and_validate_response(context, raw)
+

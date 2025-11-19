@@ -56,6 +56,11 @@ def solve(
     max_response_chars: int = typer.Option(4000, "--max-response-chars"),
     log_level: str = typer.Option("INFO", "--log-level"),
     output_path: Optional[Path] = typer.Option(None, "--output-path"),
+    max_steps: Optional[int] = typer.Option(
+        None,
+        "--max-steps",
+        help="Maximum steps to allow before aborting (defaults to optimal steps)",
+    ),
 ):
     """Solve a Towers of Hanoi instance using MAKER."""
 
@@ -67,8 +72,9 @@ def solve(
     runner = MAKERRunner(env=env, llm=llm, maker_config=maker_config)
 
     optimal_steps = 2 ** num_disks - 1
+    max_steps = max_steps or optimal_steps
     typer.echo(f"Optimal number of steps: {optimal_steps}")
-    outputs = runner.run_full_task()
+    outputs = runner.run_full_task(max_steps=max_steps)
     final_state = outputs[-1].next_state if outputs else env.initial_state()
     if not is_goal_state(final_state, num_disks):
         raise typer.Exit(code=1)
