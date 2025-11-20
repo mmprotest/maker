@@ -11,13 +11,29 @@ MAKER MDAP implements the **Maximal Agentic Decomposition** method with first-to
 
 ## Installation
 
-Requirements: Python 3.11+
+Requirements: Python 3.11+. Create and activate a virtual environment before installing dependencies.
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -e .[test]
 ```
 
 If you are using a non-default OpenAI-compatible endpoint, configure `OPENAI_API_KEY` and optionally `MAKER_BASE_URL` in your environment before running the CLI.
+
+## Quickstart
+
+1. Set your API key: `export OPENAI_API_KEY=sk-...` (and optionally `MAKER_BASE_URL=https://api.openai.com/v1`).
+2. Install the package with the command above.
+3. Run `maker-hanoi solve --num-disks 3 --model gpt-4.1-mini` to watch the full loop execute.
+4. Inspect the generated move log to verify progress and voting behavior.
+
+## Architecture overview
+
+- **Core loop** (`maker_mdap.core`): orchestrates candidate generation, parsing, voting, and red-flag retries until a `k`-vote lead is achieved or limits are exceeded.
+- **Task environments** (`maker_mdap.task`): define prompts, validation, and goal checking. The bundled Towers of Hanoi environment supplies deterministic optimal paths for evaluation.
+- **Clients** (`maker_mdap.client`): wrap OpenAI-compatible chat endpoints with typed request/response handling, configurable temperatures, and token limits.
+- **CLI** (`maker_mdap.cli`): Typer commands wire user input into the core loop and environment, handling configuration resolution from flags and environment variables.
 
 ## Usage
 
@@ -54,12 +70,30 @@ maker-hanoi estimate --num-disks 4 --num-samples 100 --model gpt-4.1-mini
 
 Set `--no-red-flags` to allow best-effort parsing of malformed responses (useful for debugging prompt quality).
 
-## Configuration
+### Configuration reference
 
 The CLI builds configuration objects defined in `maker_mdap.config` and can also read settings from environment variables:
 
-- LLM: `MAKER_MODEL`, `OPENAI_API_KEY`, `MAKER_BASE_URL`, `MAKER_TEMPERATURE`, `MAKER_MAX_OUTPUT_TOKENS`, `MAKER_REQUEST_TIMEOUT`
-- MAKER runtime: `MAKER_K`, `MAKER_MAX_VOTES_PER_STEP`, `MAKER_MAX_RED_FLAG_RETRIES_PER_STEP`, `MAKER_MAX_RESPONSE_CHARS`, `MAKER_LOG_LEVEL`
+| Category | Env var | Default | Description |
+| --- | --- | --- | --- |
+| LLM | `MAKER_MODEL` | `gpt-4.1-mini` | Chat model name for candidate generation. |
+|  | `OPENAI_API_KEY` | _required_ | Token used to authenticate requests. |
+|  | `MAKER_BASE_URL` | OpenAI default | Override base URL for compatible providers. |
+|  | `MAKER_TEMPERATURE` | `0.0` | Sampling temperature applied to generation requests. |
+|  | `MAKER_MAX_OUTPUT_TOKENS` | `1024` | Token cap for each model completion. |
+|  | `MAKER_REQUEST_TIMEOUT` | `30` | Timeout (seconds) applied to HTTP requests. |
+| Runtime | `MAKER_K` | `3` | Vote lead required to accept a candidate. |
+|  | `MAKER_MAX_VOTES_PER_STEP` | `10` | Upper bound on total votes per step before aborting. |
+|  | `MAKER_MAX_RED_FLAG_RETRIES_PER_STEP` | `5` | Number of retries allowed after malformed responses. |
+|  | `MAKER_MAX_RESPONSE_CHARS` | `4000` | Hard cutoff for parsing oversized model outputs. |
+|  | `MAKER_LOG_LEVEL` | `INFO` | Logging verbosity for the CLI output. |
+
+Configuration values are merged from defaults, environment variables, and CLI flags (highest precedence), making it easy to script sweeps of different models or `k` values.
+
+### Sample outputs
+
+- **Solve**: Prints each accepted move in `from->to` notation, followed by per-step vote counts and a final summary of total votes and red flags observed.
+- **Estimate**: Reports the number of successful single-step predictions, the empirical accuracy, and a recommendation for a suitable `k` based on the observed distribution.
 
 ## Development
 
@@ -69,4 +103,8 @@ Run the test suite with:
 pytest
 ```
 
-The CLI entry point is exposed as `maker-hanoi`; additional environments can implement the `TaskEnvironment` protocol in `maker_mdap.core` to plug into the existing voting loop.
+Additional tips:
+
+- Use `pytest -k hanoi` to focus on environment-specific behaviors.
+- The CLI entry point is exposed as `maker-hanoi`; additional environments can implement the `TaskEnvironment` protocol in `maker_mdap.core` to plug into the existing voting loop.
+- Type hints are enforced across the package; run `python -m maker_mdap.cli --help` to see the full command surface.
